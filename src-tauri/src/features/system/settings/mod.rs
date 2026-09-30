@@ -348,6 +348,8 @@ impl Default for AppSettings {
             network_proxy_url: default_network_proxy_url(),
             github_mirror_enabled: false,
             github_mirror_base_url: GITHUB_MIRROR_PRESETS[0].to_string(),
+            institution_proxy_prefix: String::new(),
+            institution_proxy_cookie: String::new(),
             paper_tree_label_mode: default_paper_tree_label_mode(),
             paper_tree_sort_mode: default_paper_tree_sort_mode(),
             paper_note_mode: default_paper_note_mode(),

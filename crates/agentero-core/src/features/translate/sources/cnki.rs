@@ -316,8 +316,8 @@ fn cnki_encrypt_words(text: &str) -> Result<String, AppError> {
     let mut buf = text.as_bytes().to_vec();
     let pad = 16 - (buf.len() % 16);
     buf.extend(std::iter::repeat_n(pad as u8, pad));
-    for chunk in buf.chunks_exact_mut(16) {
-        let block = aes::Block::from_mut_slice(chunk);
+    for block in buf.as_chunks::<16>().0 {
+        let block = aes::Block::from_mut_slice(block);
         cipher.encrypt_block(block);
     }
     let b64 = B64.encode(&buf);
@@ -407,7 +407,7 @@ mod tests {
             let b64 = words.replace('_', "/").replace('-', "+");
             let mut buf = B64.decode(b64).unwrap();
             let cipher = Aes128::new_from_slice(b"4e87183cfd3a45fe").unwrap();
-            for chunk in buf.chunks_exact_mut(16) {
+            for chunk in buf.as_chunks::<16>().0 {
                 cipher.decrypt_block(aes::Block::from_mut_slice(chunk));
             }
             let pad = *buf.last().unwrap() as usize;

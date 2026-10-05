@@ -11,6 +11,7 @@
 //! `10.x/yyyy` DOIs without a `doi.org` prefix — both false-positive heavily
 //! in chat text. Duplicates collapse in first-seen order.
 
+use crate::error::AppError;
 use crate::features::scholar_api::identifiers::{clean_doi, strip_arxiv_version};
 
 /// Identifiers extracted from one blob of text, first-seen order.
@@ -35,12 +36,16 @@ impl ExtractedIdentifiers {
     }
 }
 
-/// Characters that reliably end an identifier inside chat text.
+/// Characters that reliably end an identifier inside chat text. `&`/`?`/`=`
+/// only occur in URL query strings, never in a DOI suffix or arXiv id, so they
+/// end identifiers too — HTML-decoded share pages carry `doi.org/<doi>&amp;…`
+/// tracking tails that would otherwise corrupt the extracted DOI.
 fn ident_end(c: char) -> bool {
     c.is_whitespace()
         || matches!(
             c,
-            '"' | '\''
+            '&' | '?' | '=' | '"'
+                | '\''
                 | '<'
                 | '>'
                 | '('
@@ -190,6 +195,79 @@ pub fn extract_identifiers(text: &str) -> ExtractedIdentifiers {
     out
 }
 
+/// True when `text` is exactly a public AI-chat share URL whose page renders
+/// server-side, so a plain HTTP GET yields the conversation text. ChatGPT
+/// first (#652); Claude/Gemini share pages need their own adapters and are
+/// deliberately not claimed here.
+pub fn is_share_url(text: &str) -> bool {
+    let t = text.trim();
+    if t.contains(char::is_whitespace) {
+        return false;
+    }
+    let lowered = t.to_ascii_lowercase();
+    let known = lowered.starts_with("https://chatgpt.com/share/")
+        || lowered.starts_with("https://chat.openai.com/share/");
+    known && lowered.rsplit('/').next().is_some_and(|id| !id.is_empty())
+}
+
+/// chatgpt.com serves Cloudflare challenges to non-browser agents; a desktop
+/// Chrome UA passes for share pages (verified against a real share link).
+const SHARE_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
+/// Fetch a share page over HTTPS and return its server-rendered HTML.
+/// Cloudflare fingerprints non-browser TLS stacks even behind a real UA, so
+/// send the full browser header set — the combo matters as much as the UA.
+async fn fetch_share_page(url: &str) -> Result<String, AppError> {
+    let client = reqwest::Client::builder()
+        .user_agent(SHARE_UA)
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| AppError::Message(format!("share http client: {e}")))?;
+    let resp = client
+        .get(url)
+        .header("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+        .header("accept-language", "zh-CN,zh;q=0.9,en;q=0.8")
+        .header("sec-ch-ua", "\"Chromium\";v=\"130\", \"Google Chrome\";v=\"130\"")
+        .header("sec-ch-ua-mobile", "?0")
+        .header("sec-ch-ua-platform", "\"Windows\"")
+        .header("sec-fetch-dest", "document")
+        .header("sec-fetch-mode", "navigate")
+        .header("sec-fetch-site", "none")
+        .header("sec-fetch-user", "?1")
+        .header("upgrade-insecure-requests", "1")
+        .send()
+        .await
+        .map_err(|e| AppError::Message(format!("share fetch failed: {e}")))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(AppError::Message(format!(
+            "share fetch returned HTTP {status}"
+        )));
+    }
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| AppError::Message(format!("share read failed: {e}")))?;
+    if body.contains("Just a moment...") {
+        return Err(AppError::Message(
+            "share page served a bot challenge; paste the conversation text instead".into(),
+        ));
+    }
+    Ok(body)
+}
+
+/// Fetch a share URL and extract identifiers from its server-rendered text.
+/// The conversation body stays in memory only — identifiers are returned,
+/// the page text is dropped. No HTML entity decoding is needed: `&` already
+/// ends identifiers, so `&amp;`-suffixed tracking tails are cut by the
+/// scanner itself.
+pub async fn extract_from_share_url(
+    url: &str,
+) -> Result<ExtractedIdentifiers, AppError> {
+    let html = fetch_share_page(url).await?;
+    Ok(extract_identifiers(&html))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +311,27 @@ mod tests {
         let out =
             extract_identifiers("看 https://github.com/poco-ai/Agentero 和 https://www.bing.com");
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn share_url_detection() {
+        assert!(is_share_url("https://chatgpt.com/share/6ac3cc27-d230-83ec-a2c5-7f7849d3c8e0"));
+        assert!(is_share_url("https://chat.openai.com/share/abc123"));
+        assert!(!is_share_url("https://chatgpt.com/share/"));
+        assert!(!is_share_url("https://chatgpt.com/"));
+        assert!(!is_share_url("看这个 https://chatgpt.com/share/xyz 谢谢"));
+        assert!(!is_share_url("https://arxiv.org/abs/2403.15388"));
+        assert!(!is_share_url("http://chatgpt.com/share/abc"));
+    }
+
+    #[test]
+    fn html_entity_tails_stripped() {
+        // Share pages carry DOIs inside href attributes with entity-encoded
+        // query tails; `&` ending identifiers cuts them without any decoding.
+        let html = "论文 <a href=\"https://doi.org/10.1088/1361-6560/ac1a20&amp;from=chat\">链接</a>。";
+        assert_eq!(
+            extract_identifiers(html).dois,
+            vec!["10.1088/1361-6560/ac1a20"]
+        );
     }
 }

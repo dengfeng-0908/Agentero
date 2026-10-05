@@ -77,6 +77,8 @@ export type VaultSidebarHeaderProps = {
 	/** Vault-relative papers parent, e.g. `papers` or `papers/nlp` */
 	lookupParentDir: string;
 	onLookupSubmit: (texts: string[]) => Promise<void>;
+	/** Chat-review confirm (#652): one batch import job for the checked rows. */
+	onLookupBatchSubmit?: (texts: string[]) => Promise<void>;
 	/** Bibliography import (bottom-left of magic-wand popover). */
 	onImportBibliography?: () => void | Promise<void>;
 	/** Local PDF import (bottom-left of magic-wand popover). */
@@ -109,6 +111,7 @@ export const VaultSidebarHeader = memo(function VaultSidebarHeader({
 	selection,
 	lookupParentDir,
 	onLookupSubmit,
+	onLookupBatchSubmit,
 	onImportBibliography,
 	onImportLocalPdf,
 	importBusy,
@@ -270,10 +273,13 @@ export const VaultSidebarHeader = memo(function VaultSidebarHeader({
 			.filter((item) => chatSelected.has(item.key))
 			.map((item) => item.submit);
 		if (texts.length === 0) return;
+		// One batch job (batch-level dedup + n/total progress), not per-row
+		// lookup jobs.
+		const submit = onLookupBatchSubmit ?? onLookupSubmit;
 		setLookupBusy(true);
 		setLookupError(null);
 		try {
-			await onLookupSubmit(texts);
+			await submit(texts);
 			setLookupText("");
 			setChatExtract(null);
 			setWandOpen(false);

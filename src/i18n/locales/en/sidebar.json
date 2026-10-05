@@ -338,6 +338,8 @@
 		"chatShareFetched": "fetched from share link",
 		"chatBack": "Back",
 		"chatConfirm": "Add {{count}}",
+		"batchDone": "Imported {{count}} papers",
+		"batchTask": "Batch paper import",
 		"skillImportTitle": "Choose Skills to install",
 		"skillImportCancel": "Cancel",
 		"skillImportConfirm": "Install {{count}}",

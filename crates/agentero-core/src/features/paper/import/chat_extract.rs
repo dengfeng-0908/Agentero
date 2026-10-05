@@ -44,7 +44,9 @@ fn ident_end(c: char) -> bool {
     c.is_whitespace()
         || matches!(
             c,
-            '&' | '?' | '=' | '"'
+            '&' | '?'
+                | '='
+                | '"'
                 | '\''
                 | '<'
                 | '>'
@@ -261,9 +263,7 @@ async fn fetch_share_page(url: &str) -> Result<String, AppError> {
 /// the page text is dropped. No HTML entity decoding is needed: `&` already
 /// ends identifiers, so `&amp;`-suffixed tracking tails are cut by the
 /// scanner itself.
-pub async fn extract_from_share_url(
-    url: &str,
-) -> Result<ExtractedIdentifiers, AppError> {
+pub async fn extract_from_share_url(url: &str) -> Result<ExtractedIdentifiers, AppError> {
     let html = fetch_share_page(url).await?;
     Ok(extract_identifiers(&html))
 }
@@ -315,7 +315,9 @@ mod tests {
 
     #[test]
     fn share_url_detection() {
-        assert!(is_share_url("https://chatgpt.com/share/6ac3cc27-d230-83ec-a2c5-7f7849d3c8e0"));
+        assert!(is_share_url(
+            "https://chatgpt.com/share/6ac3cc27-d230-83ec-a2c5-7f7849d3c8e0"
+        ));
         assert!(is_share_url("https://chat.openai.com/share/abc123"));
         assert!(!is_share_url("https://chatgpt.com/share/"));
         assert!(!is_share_url("https://chatgpt.com/"));
@@ -328,7 +330,8 @@ mod tests {
     fn html_entity_tails_stripped() {
         // Share pages carry DOIs inside href attributes with entity-encoded
         // query tails; `&` ending identifiers cuts them without any decoding.
-        let html = "论文 <a href=\"https://doi.org/10.1088/1361-6560/ac1a20&amp;from=chat\">链接</a>。";
+        let html =
+            "论文 <a href=\"https://doi.org/10.1088/1361-6560/ac1a20&amp;from=chat\">链接</a>。";
         assert_eq!(
             extract_identifiers(html).dois,
             vec!["10.1088/1361-6560/ac1a20"]

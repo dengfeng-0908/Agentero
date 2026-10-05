@@ -337,4 +337,66 @@ mod tests {
             vec!["10.1088/1361-6560/ac1a20"]
         );
     }
+
+    /// Distilled from a real chatgpt.com/share conversation: seven papers,
+    /// the main one surfacing in five different forms (abs/pdf/html links,
+    /// bare `arXiv:` mentions, version suffixes). The scanner must collapse
+    /// them to the seven unique ids in first-seen order — this is the
+    /// automated form of the accuracy sample quoted in #652.
+    #[test]
+    fn real_share_page_surface_forms_collapse() {
+        let page = r#"
+            <main>聊聊这篇：<a href="https://arxiv.org/abs/2603.29080">abs</a>
+            <a href="https://arxiv.org/pdf/2603.29080">pdf</a> 和 https://arxiv.org/html/2603.29080v1
+            正文里也提到 arXiv:2603.29080 与 arXiv:2603.29080v1。
+            相关工作里有 <a href="https://arxiv.org/pdf/2606.10789">a</a>
+            <a href="https://arxiv.org/html/2605.14893v1">b</a>
+            <a href="https://arxiv.org/html/2404.07983v3">c</a>
+            <a href="https://arxiv.org/abs/2605.16887">d</a>
+            <a href="https://arxiv.org/abs/2405.18570">e</a>
+            以及更早的 arXiv:1401.1671。
+            </main>
+        "#;
+        assert_eq!(
+            extract_identifiers(page).arxiv,
+            vec![
+                "2603.29080",
+                "2606.10789",
+                "2605.14893",
+                "2404.07983",
+                "2605.16887",
+                "2405.18570",
+                "1401.1671",
+            ]
+        );
+    }
+
+    #[test]
+    fn identifier_edge_boundaries() {
+        // URL query tails and mixed-case hosts.
+        let out = extract_identifiers(
+            "https://pubmed.ncbi.nlm.nih.gov/38729424/?report=classic 和 https://DOI.ORG/10.1038/nature12373",
+        );
+        assert_eq!(out.pmids, vec!["38729424"]);
+        assert_eq!(out.dois, vec!["10.1038/nature12373"]);
+
+        // `arXiv:` mention with a space after the colon still parses.
+        assert_eq!(
+            extract_identifiers("如 arXiv: 1706.03762 所示").arxiv,
+            vec!["1706.03762"]
+        );
+
+        // The same DOI twice collapses to one entry.
+        assert_eq!(
+            extract_identifiers(
+                "https://doi.org/10.1038/nature12373 再贴一次 doi.org/10.1038/nature12373"
+            )
+            .dois
+            .len(),
+            1
+        );
+
+        // Whitespace-only input yields nothing.
+        assert!(extract_identifiers("  \n\t ").is_empty());
+    }
 }

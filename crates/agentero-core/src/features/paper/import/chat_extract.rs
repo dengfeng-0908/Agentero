@@ -116,7 +116,12 @@ fn read_arxiv_tail(rest: &str) -> String {
 /// Scan chat/share text for paper identifiers.
 pub fn extract_identifiers(text: &str) -> ExtractedIdentifiers {
     let mut out = ExtractedIdentifiers::default();
-    let hay = text.to_ascii_lowercase();
+    // Chinese input methods frequently emit a full-width colon after
+    // `arXiv`/`PMID` mentions; normalize so both mention forms parse.
+    let hay = text
+        .to_ascii_lowercase()
+        .replace("arxiv：", "arxiv:")
+        .replace("pmid：", "pmid:");
 
     // arXiv URLs: arxiv.org/{abs|pdf|html|src}/<id>
     let mut rest = hay.as_str();
@@ -385,6 +390,11 @@ mod tests {
             extract_identifiers("如 arXiv: 1706.03762 所示").arxiv,
             vec!["1706.03762"]
         );
+
+        // Full-width colon after mentions (Chinese IME, credit @Fengsuid).
+        let out = extract_identifiers("重点看 arXiv：2301.08745 和 PMID：31245678");
+        assert_eq!(out.arxiv, vec!["2301.08745"]);
+        assert_eq!(out.pmids, vec!["31245678"]);
 
         // The same DOI twice collapses to one entry.
         assert_eq!(
